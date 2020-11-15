@@ -1,121 +1,79 @@
-var init = false;
-
-function sensors_on_load() {
-	setInterval(get_sensors, 1000);
-	get_sensors();
-}
-		
-function get_sensors() {
-	var proc = cockpit.spawn(["sensors", "-u"]);
-	proc.stream(sensors_output);
+function strToId(prefix,str) {
+	// parses a string into a valid DOM id with a given prefix
+	return `${prefix}_${str.replace(/\W+/g,"").toLowerCase()}`
 }
 
-function sensors_output(data) {
-	var table = document.getElementById("sensors-table");
-	
-	var current_adaptor = null;
-	var current_cpu = 0;
-	var current_gpu = 0;
-	var current_core = null;
-	
-	var lines = data.split('\n');
-	for (var i = 0;i < lines.length;i++){
-		if (current_adaptor == null) {
-			if (lines[i].startsWith('coretemp')) {
-				current_adaptor = 'CPU' + parseInt(lines[i].split('-').pop())
-				if (init == false) {
-					var row = table.insertRow(-1);
-					var header = document.createElement("TH");
-					header.innerHTML = current_adaptor;
-					header.colSpan = "4";
-					row.append(header);
-					var row = table.insertRow(-1);
-					row.innerHTML = "<td></td><td>Current</td><td>Max.</td><td>Crit.</td>";
-				}
-			} else if (lines[i].startsWith('k10temp')) {
-				current_adaptor = 'CPU' + current_cpu;
-				if (init == false) {
-					var row = table.insertRow(-1);
-					var header = document.createElement("TH");
-					header.innerHTML = current_adaptor;
-					header.colSpan = "4";
-					row.append(header);
-					var row = table.insertRow(-1);
-					row.innerHTML = "<td></td><td>Current</td><td>Max.</td><td>Crit.</td>";
-				}	
-			} else if (lines[i].startsWith('radeon')) {
-				current_adaptor = 'GPU' + current_gpu;
-				if (init == false) {
-					var row = table.insertRow(-1);
-					var header = document.createElement("TH");
-					header.innerHTML = current_adaptor;
-					header.colSpan = "4";
-					row.append(header);
-					var row = table.insertRow(-1);
-					row.innerHTML = "<td></td><td>Current</td><td>Max.</td><td>Crit.</td>";
-				}	
-                        } else if (lines[i].startsWith('cpu_thermal-virtual-0')) {
-                                current_adaptor = 'temp' + current_cpu;
-                                if (init == false) {
-                                        var row = table.insertRow(-1);
-                                        var header = document.createElement("TH");
-                                        header.innerHTML = current_adaptor;
-                                        header.colSpan = "4";
-                                        row.append(header);
-                                        var row = table.insertRow(-1);
-                                        row.innerHTML = "<td></td><td>Current</td><td>Max.</td><td>Crit.</td>";
-                                }
-			} 
-		} else if (lines[i] == '') {
-			current_adaptor = null;
-			current_core = null;
-		} else {
-			if (current_adaptor != null) {
-				if (lines[i].startsWith('Core') || lines[i].startsWith('temp')) {
-					current_core = lines[i].replace(':', '');
-					if (init == false) {
-						var row = table.insertRow(-1);
-						var name = row.insertCell(-1);
-						name.innerHTML = current_core
-						var temp_current = row.insertCell(-1);
-						temp_current.id = current_adaptor + '-' + current_core + '-current';
-						var temp_max = row.insertCell(-1);
-						temp_max.id = current_adaptor + '-' + current_core + '-max';
-						var temp_crit = row.insertCell(-1);
-						temp_crit.id = current_adaptor + '-' + current_core + '-crit';
-					}
-				} else if (lines[i].startsWith(" ") && current_core != null) {
-					var bits = lines[i].split(":");
-					var id = current_adaptor + '-' + current_core + '-current';
-					var temp_current = document.getElementById(id);
-					id = current_adaptor + '-' + current_core + '-max';
-					var temp_max = document.getElementById(id);
-					id = current_adaptor + '-' + current_core + '-crit';
-					var temp_crit = document.getElementById(id);
-					id = null;
-					if (bits[0].endsWith('input')) {
-						id = current_adaptor + '-' + current_core + '-current';
-					} else if (bits[0].endsWith('max')) {
-						id = current_adaptor + '-' + current_core + '-max';
-					} else if (bits[0].endsWith('crit')) {
-						id = current_adaptor + '-' + current_core + '-crit';
-					}
-					if (id != null) {
-						var elem = document.getElementById(id);
-						elem.innerHTML = bits[1];
-					}
-					if (parseFloat(temp_current.innerHTML) >= parseFloat(temp_crit.innerHTML)) {
-						temp_current.className = "crit";
-					} else if (parseFloat(temp_current.innerHTML) >= parseFloat(temp_max.innerHTML)) {
-						temp_current.className = "max";
-					} else {
-						temp_current.className = "";
-					}
-				}
+function createCard(adapter) {
+	// Uses a template element to parse the string into a DOM Element
+	// The string contains HTML for a card similar to those found on the cockpit overview page
+	let temp = document.createElement("template")
+	temp.innerHTML = `<article class="pf-c-card"><div class="pf-c-card__title">${adapter[0]} (${adapter[1].Adapter})</div><div class="pf-c-card__body"><table id="${strToId("adapter",adapter[0])}" class="pf-c-table pf-m-grid-md pf-m-compact"></table></div></article>`
+	return temp.content.firstChild
+}
+
+function addSensor(card, sensorName, sensorData) {
+	// Adds a sensor to the specified card's table
+	let table = card.querySelector("table")
+	let row = table.insertRow(-1)
+	row.id = strToId('sensor',sensorName)
+	let name = document.createElement("th")
+	name.innerText = sensorName
+	row.append(name)
+	for (const [key, value] of Object.entries(sensorData)){
+		let data = document.createElement("td")
+		data.id = strToId(row.id,key)
+		data.innerText = `${key.replace(/^\w+_/,"")}: ${value}`
+		row.append(data)
+	}
+}
+
+function updateSensor(adapter, sensorName, sensorData) {
+	// Updates table values of given sensor for given adapter
+	let table = document.getElementById(strToId("adapter",adapter[0]))
+	rowid = strToId('sensor', sensorName)
+	row = table.querySelector(`#${rowid}`)
+	for (const [key, value] of Object.entries(sensorData)){
+		let data = document.querySelector(`#${strToId(rowid,key)}`)
+		data.innerText = `${key.replace(/^\w+_/,"")}: ${value}`
+	}
+}
+
+function init() {
+	// Runs once, creates adapter cards and sensor tables from the json output
+	let cardContainer = document.getElementById("card-container")
+	let proc = cockpit.spawn(["sensors", "-j"])
+	proc.done((data) => {
+		const jsonData = JSON.parse(data)
+		for (const adapter of Object.entries(jsonData)) {
+			// Create card from an adapter then remove adapter. Adapter key/value pair to make sensor data parsing easier
+			card = createCard(adapter)
+			delete adapter[1].Adapter
+			// Parse sensor data and add sensors to the card
+			for (const [sensorName, sensorData]  of Object.entries(adapter[1])) {
+				addSensor(card, sensorName, sensorData)
+			}
+			cardContainer.appendChild(card)
+		}
+	})
+}
+
+function update() {
+	// Runs every second, updates the values for the sensor tables
+	let proc = cockpit.spawn(["sensors", "-j"])
+	proc.done((data) => {
+		const jsonData = JSON.parse(data)
+		for (const adapter of Object.entries(jsonData)) {
+			// Remove adapter.Adapter key/value pair to make sensor data parsing easier
+			delete adapter[1].Adapter
+			// Parse and update sensor data
+			for (const [sensorName, sensorData]  of Object.entries(adapter[1])) {
+				updateSensor(adapter, sensorName, sensorData)
 			}
 		}
-	}
-	init = true;
+	})
 }
 
-document.addEventListener('DOMContentLoaded', sensors_on_load)
+document.addEventListener("DOMContentLoaded", () => {
+	init()
+	setInterval(update, 1000)
+})
